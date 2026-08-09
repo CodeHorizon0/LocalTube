@@ -6,5 +6,5 @@ Writen in Rust & TypeScript with Tauri & React
 
 ## Debug
 Cache dirs:
-- C:\Users\PC\AppData\Local\com.pc.localtube
-- C:\Users\PC\AppData\Roaming\com.pc.localtube
+- C:\Users\<USER>\AppData\Local\com.pc.localtube
+- C:\Users\<USER>\AppData\Roaming\com.pc.localtube
