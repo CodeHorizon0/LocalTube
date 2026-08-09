@@ -1,0 +1,192 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.appHeader {
+  background-color: var(--bg-secondary);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #2a2a2a;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.appHeader h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #ff4d4d, #ff6a00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.folderPath {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  font-size: 0.9rem;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+.primaryBtn {
+  background-color: var(--accent);
+  color: #000;
+  padding: 12px 32px;
+  font-size: 1rem;
+}
+
+.primaryBtn:hover {
+  background-color: #2799f0;
+}
+
+.secondaryBtn {
+  background-color: #2a2a2a;
+  color: var(--text-primary);
+}
+
+.secondaryBtn:hover {
+  background-color: #3a3a3a;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+  gap: 20px;
+  padding: 20px;
+}
+
+.emptyState h1 {
+  font-size: 3rem;
+  background: linear-gradient(135deg, #ff4d4d, #ff6a00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.emptyState p {
+  font-size: 1.2rem;
+  color: var(--text-secondary);
+  max-width: 400px;
+}
+
+.videoGridContainer {
+  flex: 1;
+  padding: 24px;
+}
+
+.videoGrid {
+  display: grid;
+  gap: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+@media (min-width: 900px) {
+  .videoGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1600px) {
+  .videoGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 899px) and (min-width: 600px) {
+  .videoGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 599px) and (min-width: 400px) {
+  .videoGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 399px) {
+  .videoGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.videoCardSkeleton {
+  background-color: var(--bg-card);
+  border-radius: var(--radius);
+  overflow: hidden;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.thumbnailSkeleton {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.titleSkeleton {
+  height: 20px;
+  margin: 12px 16px 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+
+.metaSkeleton {
+  height: 16px;
+  margin: 0 16px 12px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  width: 60%;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.noVideos {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  padding: 40px 0;
+}
