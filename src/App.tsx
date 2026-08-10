@@ -1,3 +1,4 @@
+// App.tsx
 import React, { Suspense, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -100,13 +101,7 @@ function App() {
         {loading ? (
           <div className={styles.videoGrid}>
             {Array.from({ length: 8 }).map(function (_, i) {
-              return (
-                <div className={styles.videoCardSkeleton} key={i}>
-                  <div className={styles.thumbnailSkeleton} />
-                  <div className={styles.titleSkeleton} />
-                  <div className={styles.metaSkeleton} />
-                </div>
-              );
+              return <VideoCard key={i} skeleton={true} />;
             })}
           </div>
         ) : videos.length === 0 ? (

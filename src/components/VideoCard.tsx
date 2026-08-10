@@ -1,11 +1,27 @@
+// VideoCard.tsx
 import React, { useEffect, useState, useRef } from "react";
 import styles from "./VideoCard.module.css";
 import { VideoFile } from "../types";
 import { generateThumbnail, computeShadowColor, shadowColorCache } from "../utils/thumbnailHelpers";
 
-function VideoCard(props: { video: VideoFile }) {
-  const video = props.video;
-  const displayName = video.name.replace(/\.[^.]+$/, "");
+interface VideoCardProps {
+  video?: VideoFile;
+  skeleton?: boolean;
+}
+
+function VideoCard({ video, skeleton = false }: VideoCardProps) {
+  if (skeleton) {
+    return (
+      <div className={styles.videoCard}>
+        <div className={styles.thumbnailSkeleton} />
+        <div className={styles.videoInfo}>
+          <h3 className={styles.titleSkeleton} />
+        </div>
+      </div>
+    );
+  }
+
+  const displayName = video!.name.replace(/\.[^.]+$/, "");
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [shadowColor, setShadowColor] = useState<string | null>(null);
@@ -16,7 +32,7 @@ function VideoCard(props: { video: VideoFile }) {
     let mounted = true;
 
     function loadThumbnail() {
-      generateThumbnail(video.path)
+      generateThumbnail(video!.path)
         .then(function (url) {
           if (mounted) {
             setThumbnailUrl(url);
@@ -24,7 +40,7 @@ function VideoCard(props: { video: VideoFile }) {
           }
         })
         .catch(function (err) {
-          console.error("Failed to generate thumbnail for", video.path, err);
+          console.error("Failed to generate thumbnail for", video!.path, err);
           if (mounted) {
             setLoading(false);
           }
@@ -36,39 +52,39 @@ function VideoCard(props: { video: VideoFile }) {
     return function () {
       mounted = false;
     };
-  }, [video.path]);
+  }, [video!.path]);
 
-function handleMouseEnter() {
-  if (isColorGenerated.current) return;
-  if (!thumbnailUrl) return;
+  function handleMouseEnter() {
+    if (isColorGenerated.current) return;
+    if (!thumbnailUrl) return;
 
-  const cached = shadowColorCache.get(video.path);
-  if (cached) {
-    setShadowColor(cached);
-    isColorGenerated.current = true;
-    return;
-  }
-
-  const img = imgRef.current;
-  if (!img) return;
-
-  function computeColor(element: HTMLImageElement) {
-    const color = computeShadowColor(element);
-    if (color) {
-      shadowColorCache.set(video.path, color);
-      setShadowColor(color);
+    const cached = shadowColorCache.get(video!.path);
+    if (cached) {
+      setShadowColor(cached);
+      isColorGenerated.current = true;
+      return;
     }
-    isColorGenerated.current = true;
-  }
 
-  if (img.complete) {
-    computeColor(img);
-  } else {
-    img.onload = function () {
+    const img = imgRef.current;
+    if (!img) return;
+
+    function computeColor(element: HTMLImageElement) {
+      const color = computeShadowColor(element);
+      if (color) {
+        shadowColorCache.set(video!.path, color);
+        setShadowColor(color);
+      }
+      isColorGenerated.current = true;
+    }
+
+    if (img.complete) {
       computeColor(img);
-    };
+    } else {
+      img.onload = function () {
+        computeColor(img);
+      };
+    }
   }
-}
 
   const cardStyle = shadowColor
     ? ({ "--shadow-color": shadowColor } as React.CSSProperties)
@@ -82,7 +98,7 @@ function handleMouseEnter() {
     >
       <div className={styles.thumbnail}>
         {loading ? (
-          <div className={styles.thumbnailPlaceholder}>Loading thumbnail…</div>
+          <div className={styles.thumbnailSkeleton} />
         ) : thumbnailUrl ? (
           <img
             ref={imgRef}

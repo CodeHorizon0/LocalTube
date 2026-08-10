@@ -24,6 +24,11 @@ export function generateThumbnail(videoPath: string): Promise<string> {
 }
 
 export function computeShadowColor(img: HTMLImageElement): string | null {
+  const src = img.src || img.currentSrc;
+  if (src && shadowColorCache.has(src)) {
+    return shadowColorCache.get(src)!;
+  }
+
   try {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -52,30 +57,32 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
 
     const imageData = ctx.getImageData(0, 0, drawW, drawH);
     const data = imageData.data;
-    const pixelCount = drawW * drawH;
 
     const shift = 3;
     const map = new Map<string, ColorGroup>();
 
-    for (let i = 0; i < pixelCount; i++) {
-      const idx = i * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-      const key = (r >> shift) + "," + (g >> shift) + "," + (b >> shift);
-      const existing = map.get(key);
-      if (existing) {
-        existing.count++;
-        existing.sumR += r;
-        existing.sumG += g;
-        existing.sumB += b;
-      } else {
-        map.set(key, {
-          count: 1,
-          sumR: r,
-          sumG: g,
-          sumB: b,
-        });
+    for (let y = 0; y < drawH; y++) {
+      for (let x = 0; x < drawW; x++) {
+        if ((x + y) % 2 !== 0) continue;
+        const idx = (y * drawW + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const key = (r >> shift) + "," + (g >> shift) + "," + (b >> shift);
+        const existing = map.get(key);
+        if (existing) {
+          existing.count++;
+          existing.sumR += r;
+          existing.sumG += g;
+          existing.sumB += b;
+        } else {
+          map.set(key, {
+            count: 1,
+            sumR: r,
+            sumG: g,
+            sumB: b,
+          });
+        }
       }
     }
 
@@ -111,7 +118,26 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
       shadowB = Math.round(primary.sumB / primary.count);
     }
 
-    return `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.8)`;
+    let brightness = (shadowR + shadowG + shadowB) / 3;
+    const minBright = 50;  
+    const maxBright = 200; 
+    if (brightness < minBright) {
+      const factor = minBright / brightness;
+      shadowR = Math.min(255, Math.round(shadowR * factor));
+      shadowG = Math.min(255, Math.round(shadowG * factor));
+      shadowB = Math.min(255, Math.round(shadowB * factor));
+    } else if (brightness > maxBright) {
+      const factor = maxBright / brightness;
+      shadowR = Math.round(shadowR * factor);
+      shadowG = Math.round(shadowG * factor);
+      shadowB = Math.round(shadowB * factor);
+    }
+
+    const result = `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.5)`;
+    if (src) {
+      shadowColorCache.set(src, result);
+    }
+    return result;
   } catch (_) {
     return null;
   }
