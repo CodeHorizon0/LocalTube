@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
+use tokio::sync::Semaphore;
 use tokio::task::spawn_blocking;
 use walkdir::WalkDir;
 use sha2::{Sha256, Digest};
@@ -19,6 +21,23 @@ pub struct StartupStatus {
     pub library_path: Option<String>,
     pub ffmpeg_available: bool,
     pub error: Option<String>,
+}
+
+struct VideoInfo {
+    duration: f64,
+    cover_stream_index: Option<usize>,
+}
+
+fn semaphore() -> &'static Semaphore {
+    static THUMBNAIL_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+    THUMBNAIL_SEMAPHORE.get_or_init(|| {
+        let max_concurrent = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .max(1)
+            .min(4);
+        Semaphore::new(max_concurrent)
+    })
 }
 
 fn check_ffmpeg() -> bool {
@@ -58,7 +77,7 @@ async fn get_video_hash(video_path: &str) -> Result<String, String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-async fn extract_cover_art(video_path: &str) -> Result<Option<Vec<u8>>, String> {
+async fn get_video_info(video_path: &str) -> Result<VideoInfo, String> {
     let output = tokio::process::Command::new("ffprobe")
         .arg("-v")
         .arg("error")
@@ -66,6 +85,8 @@ async fn extract_cover_art(video_path: &str) -> Result<Option<Vec<u8>>, String> 
         .arg("v")
         .arg("-show_entries")
         .arg("stream=codec_name,disposition,width,height")
+        .arg("-show_entries")
+        .arg("format=duration")
         .arg("-of")
         .arg("json")
         .arg(video_path)
@@ -74,12 +95,17 @@ async fn extract_cover_art(video_path: &str) -> Result<Option<Vec<u8>>, String> 
         .map_err(|e| format!("ffprobe failed: {}", e))?;
 
     if !output.status.success() {
-        return Ok(None);
+        return Err("ffprobe error".into());
     }
 
     let json_str = String::from_utf8_lossy(&output.stdout);
     let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|_| "Invalid JSON from ffprobe".to_string())?;
+
+    let duration = value["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
 
     let streams = value["streams"].as_array().ok_or("No streams array")?;
     let mut cover_stream_index = None;
@@ -88,47 +114,44 @@ async fn extract_cover_art(video_path: &str) -> Result<Option<Vec<u8>>, String> 
         let is_attached = stream["disposition"]["attached_pic"].as_u64().unwrap_or(0) == 1;
         let codec = stream["codec_name"].as_str().unwrap_or("");
 
-        if is_attached || codec == "mjpeg" || codec == "png" {
+        if is_attached || codec == "mjpeg" || codec == "png" || codec == "jpeg" || codec == "webp" || codec == "bmp" {
             cover_stream_index = Some(idx);
             break;
         }
     }
 
-    if let Some(index) = cover_stream_index {
-        let output = tokio::process::Command::new("ffmpeg")
-            .arg("-i")
-            .arg(video_path)
-            .arg("-map")
-            .arg(format!("0:v:{}", index))
-            .arg("-vframes")
-            .arg("1")
-            .arg("-f")
-            .arg("image2pipe")
-            .arg("-vcodec")
-            .arg("mjpeg")
-            .arg("-")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .await
-            .map_err(|e| format!("Failed to extract cover art: {}", e))?;
-
-        if output.status.success() && !output.stdout.is_empty() {
-            return Ok(Some(output.stdout));
-        }
-    }
-
-    Ok(None)
+    Ok(VideoInfo {
+        duration,
+        cover_stream_index,
+    })
 }
 
-async fn generate_thumbnail_data(video_path: &str) -> Result<Vec<u8>, String> {
-    if let Some(cover_data) = extract_cover_art(video_path).await? {
-        return Ok(cover_data);
+async fn extract_cover_art(video_path: &str, index: usize) -> Result<Vec<u8>, String> {
+    let output = tokio::process::Command::new("ffmpeg")
+        .arg("-i")
+        .arg(video_path)
+        .arg("-map")
+        .arg(format!("0:v:{}", index))
+        .arg("-vframes")
+        .arg("1")
+        .arg("-f")
+        .arg("image2pipe")
+        .arg("-vcodec")
+        .arg("mjpeg")
+        .arg("-")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to extract cover art: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("Empty cover art".into());
     }
+    Ok(output.stdout)
+}
 
-    let duration = get_duration(video_path).await?;
-    let seek_time = if duration > 3.0 { 3.0 } else if duration > 1.0 { duration * 0.3 } else { 0.0 };
-
+async fn extract_frame_at(video_path: &str, seek_time: f64) -> Result<Vec<u8>, String> {
     let output = tokio::process::Command::new("ffmpeg")
         .arg("-ss")
         .arg(seek_time.to_string())
@@ -149,13 +172,39 @@ async fn generate_thumbnail_data(video_path: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
 
-    if !output.status.success() {
-        return Err("ffmpeg exited with error".into());
-    }
-    if output.stdout.is_empty() {
-        return Err("Empty output from ffmpeg".into());
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("Empty frame".into());
     }
     Ok(output.stdout)
+}
+
+async fn generate_thumbnail_data(video_path: &str) -> Result<Vec<u8>, String> {
+    let info = get_video_info(video_path).await?;
+
+    if let Some(index) = info.cover_stream_index {
+        if let Ok(data) = extract_cover_art(video_path, index).await {
+            return Ok(data);
+        }
+    }
+
+    let seek_time = if info.duration > 3.0 {
+        3.0
+    } else if info.duration > 1.0 {
+        info.duration * 0.3
+    } else {
+        0.0
+    };
+
+    match extract_frame_at(video_path, seek_time).await {
+        Ok(data) => Ok(data),
+        Err(_) => {
+            if seek_time != 0.0 {
+                extract_frame_at(video_path, 0.0).await
+            } else {
+                Err("Failed to extract thumbnail even at position 0".into())
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -250,6 +299,11 @@ async fn generate_thumbnail(
         return Ok(BASE64_STANDARD.encode(data));
     }
 
+    let _permit = semaphore()
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire semaphore: {}", e))?;
+
     let image_data = generate_thumbnail_data(&video_path).await?;
 
     let cache_file_clone = cache_file.clone();
@@ -260,28 +314,6 @@ async fn generate_thumbnail(
 
     use base64::prelude::*;
     Ok(BASE64_STANDARD.encode(image_data))
-}
-
-async fn get_duration(video_path: &str) -> Result<f64, String> {
-    let output = tokio::process::Command::new("ffprobe")
-        .arg("-v")
-        .arg("error")
-        .arg("-show_entries")
-        .arg("format=duration")
-        .arg("-of")
-        .arg("default=noprint_wrappers=1:nokey=1")
-        .arg(video_path)
-        .output()
-        .await
-        .map_err(|e| format!("ffprobe failed: {}", e))?;
-
-    if !output.status.success() {
-        return Err("ffprobe error".into());
-    }
-    let dur_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    dur_str
-        .parse::<f64>()
-        .map_err(|_| "Invalid duration".into())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
