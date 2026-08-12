@@ -1,8 +1,12 @@
-// VideoCard.tsx
 import React, { useEffect, useState, useRef } from "react";
 import styles from "./VideoCard.module.css";
 import { VideoFile } from "../types";
-import { generateThumbnail, computeShadowColor, shadowColorCache } from "../utils/thumbnailHelpers";
+import {
+  generateThumbnail,
+  generatePreviewGif,
+  computeShadowColor,
+  shadowColorCache,
+} from "../utils/thumbnailHelpers";
 
 interface VideoCardProps {
   video?: VideoFile;
@@ -28,89 +32,151 @@ function VideoCard({ video, skeleton = false }: VideoCardProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const isColorGenerated = useRef<boolean>(false);
 
-  useEffect(function () {
-    let mounted = true;
+  const [previewGifUrl, setPreviewGifUrl] = useState<string | null>(null);
+  const [showGif, setShowGif] = useState<boolean>(false);
+  const [gifLoading, setGifLoading] = useState<boolean>(false);
+  const hoverTimerRef = useRef<number | null>(null);
+  const isHoveringRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
-    function loadThumbnail() {
-      generateThumbnail(video!.path)
-        .then(function (url) {
-          if (mounted) {
-            setThumbnailUrl(url);
-            setLoading(false);
-          }
-        })
-        .catch(function (err) {
-          console.error("Failed to generate thumbnail for", video!.path, err);
-          if (mounted) {
-            setLoading(false);
-          }
-        });
-    }
+  useEffect(
+    function () {
+      isMountedRef.current = true;
 
-    loadThumbnail();
+      function loadThumbnail() {
+        generateThumbnail(video!.path)
+          .then(function (url) {
+            if (isMountedRef.current) {
+              setThumbnailUrl(url);
+              setLoading(false);
+            }
+          })
+          .catch(function (err) {
+            console.error("Failed to generate thumbnail for", video!.path, err);
+            if (isMountedRef.current) {
+              setLoading(false);
+            }
+          });
+      }
 
-    return function () {
-      mounted = false;
-    };
-  }, [video!.path]);
+      loadThumbnail();
+
+      return function () {
+        isMountedRef.current = false;
+        if (hoverTimerRef.current !== null) {
+          window.clearTimeout(hoverTimerRef.current);
+          hoverTimerRef.current = null;
+        }
+      };
+    },
+    [video!.path]
+  );
 
   function handleMouseEnter() {
-    if (isColorGenerated.current) return;
-    if (!thumbnailUrl) return;
+    isHoveringRef.current = true;
 
-    const cached = shadowColorCache.get(video!.path);
-    if (cached) {
-      setShadowColor(cached);
-      isColorGenerated.current = true;
-      return;
-    }
+    if (isColorGenerated.current === false) {
+      if (!thumbnailUrl) return;
 
-    const img = imgRef.current;
-    if (!img) return;
-
-    function computeColor(element: HTMLImageElement) {
-      const color = computeShadowColor(element);
-      if (color) {
-        shadowColorCache.set(video!.path, color);
-        setShadowColor(color);
+      const cached = shadowColorCache.get(video!.path);
+      if (cached) {
+        setShadowColor(cached);
+        isColorGenerated.current = true;
+      } else {
+        const img = imgRef.current;
+        if (img) {
+          function computeColor(element: HTMLImageElement) {
+            const color = computeShadowColor(element);
+            if (color) {
+              shadowColorCache.set(video!.path, color);
+              setShadowColor(color);
+            }
+            isColorGenerated.current = true;
+          }
+          if (img.complete) {
+            computeColor(img);
+          } else {
+            img.onload = function () {
+              computeColor(img);
+            };
+          }
+        }
       }
-      isColorGenerated.current = true;
     }
 
-    if (img.complete) {
-      computeColor(img);
-    } else {
-      img.onload = function () {
-        computeColor(img);
-      };
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
     }
+
+    hoverTimerRef.current = window.setTimeout(function () {
+      if (previewGifUrl) {
+        setShowGif(true);
+        return;
+      }
+      if (!gifLoading) {
+        setGifLoading(true);
+        generatePreviewGif(video!.path)
+          .then(function (url) {
+            if (isMountedRef.current && isHoveringRef.current) {
+              setPreviewGifUrl(url);
+              setShowGif(true);
+            }
+            setGifLoading(false);
+          })
+          .catch(function (err) {
+            console.error("Failed to generate preview gif for", video!.path, err);
+            if (isMountedRef.current) {
+              setGifLoading(false);
+            }
+          });
+      }
+    }, 500);
+  }
+
+  function handleMouseLeave() {
+    isHoveringRef.current = false;
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setShowGif(false);
+    setGifLoading(false);
   }
 
   const cardStyle = shadowColor
     ? ({ "--shadow-color": shadowColor } as React.CSSProperties)
     : {};
 
+  let thumbnailContent = null;
+  if (loading) {
+    thumbnailContent = <div className={styles.thumbnailSkeleton} />;
+  } else if (showGif && previewGifUrl) {
+    thumbnailContent = (
+      <img src={previewGifUrl} alt={displayName} loading="lazy" decoding="async" />
+    );
+  } else if (thumbnailUrl) {
+    thumbnailContent = (
+      <img
+        ref={imgRef}
+        src={thumbnailUrl}
+        alt={displayName}
+        loading="lazy"
+        decoding="async"
+      />
+    );
+  } else {
+    thumbnailContent = <div className={styles.thumbnailPlaceholder}>No preview</div>;
+  }
+
   return (
     <div
       className={styles.videoCard}
       style={cardStyle}
       onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
-      <div className={styles.thumbnail}>
-        {loading ? (
-          <div className={styles.thumbnailSkeleton} />
-        ) : thumbnailUrl ? (
-          <img
-            ref={imgRef}
-            src={thumbnailUrl}
-            alt={displayName}
-            loading="lazy"
-            decoding="async"
-          />
-        ) : (
-          <div className={styles.thumbnailPlaceholder}>No preview</div>
-        )}
-      </div>
+      <div className={styles.thumbnail}>{thumbnailContent}</div>
       <div className={styles.videoInfo}>
         <h3 className={styles.videoTitle}>{displayName}</h3>
       </div>

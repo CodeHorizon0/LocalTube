@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ColorGroup } from "../types";
 
 const thumbnailCache = new Map<string, string>();
+const previewGifCache = new Map<string, string>();
 export const shadowColorCache = new Map<string, string>();
 
 export function generateThumbnail(videoPath: string): Promise<string> {
@@ -11,10 +12,29 @@ export function generateThumbnail(videoPath: string): Promise<string> {
       resolve(cached);
       return;
     }
-    invoke<string>("generate_thumbnail", { videoPath: videoPath })
+    invoke<string>("gen_thumb", { videoPath: videoPath })
       .then(function (base64) {
-        const dataUrl = `data:image/jpeg;base64,${base64}`;
+        const dataUrl = "data:image/jpeg;base64," + base64;
         thumbnailCache.set(videoPath, dataUrl);
+        resolve(dataUrl);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+  });
+}
+
+export function generatePreviewGif(videoPath: string): Promise<string> {
+  return new Promise(function (resolve, reject) {
+    const cached = previewGifCache.get(videoPath);
+    if (cached) {
+      resolve(cached);
+      return;
+    }
+    invoke<string>("gen_gif", { videoPath: videoPath })
+      .then(function (base64) {
+        const dataUrl = "data:image/gif;base64," + base64;
+        previewGifCache.set(videoPath, dataUrl);
         resolve(dataUrl);
       })
       .catch(function (err) {
@@ -119,8 +139,8 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
     }
 
     let brightness = (shadowR + shadowG + shadowB) / 3;
-    const minBright = 50;  
-    const maxBright = 200; 
+    const minBright = 50;
+    const maxBright = 200;
     if (brightness < minBright) {
       const factor = minBright / brightness;
       shadowR = Math.min(255, Math.round(shadowR * factor));
@@ -133,7 +153,7 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
       shadowB = Math.round(shadowB * factor);
     }
 
-    const result = `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.5)`;
+    const result = "rgba(" + shadowR + ", " + shadowG + ", " + shadowB + ", 0.5)";
     if (src) {
       shadowColorCache.set(src, result);
     }
