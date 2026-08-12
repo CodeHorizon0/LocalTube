@@ -14,7 +14,7 @@ export function generateThumbnail(videoPath: string): Promise<string> {
     }
     invoke<string>("gen_thumb", { videoPath: videoPath })
       .then(function (base64) {
-        const dataUrl = "data:image/jpeg;base64," + base64;
+        const dataUrl = `data:image/jpeg;base64,${base64}`;
         thumbnailCache.set(videoPath, dataUrl);
         resolve(dataUrl);
       })
@@ -33,7 +33,7 @@ export function generatePreviewGif(videoPath: string): Promise<string> {
     }
     invoke<string>("gen_gif", { videoPath: videoPath })
       .then(function (base64) {
-        const dataUrl = "data:image/gif;base64," + base64;
+        const dataUrl = `data:image/gif;base64,${base64}`;
         previewGifCache.set(videoPath, dataUrl);
         resolve(dataUrl);
       })
@@ -88,7 +88,7 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
         const r = data[idx];
         const g = data[idx + 1];
         const b = data[idx + 2];
-        const key = (r >> shift) + "," + (g >> shift) + "," + (b >> shift);
+        const key = `${r >> shift},${g >> shift},${b >> shift}`;
         const existing = map.get(key);
         if (existing) {
           existing.count++;
@@ -153,7 +153,7 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
       shadowB = Math.round(shadowB * factor);
     }
 
-    const result = "rgba(" + shadowR + ", " + shadowG + ", " + shadowB + ", 0.5)";
+    const result = `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.5)`;
     if (src) {
       shadowColorCache.set(src, result);
     }
