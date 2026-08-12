@@ -23,21 +23,14 @@ pub struct StartupStatus {
     pub error: Option<String>,
 }
 
-struct VideoInfo {
-    duration: f64,
-    cover_stream_index: Option<usize>,
+fn thumbnail_semaphore() -> &'static Semaphore {
+    static THUMBNAIL_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+    THUMBNAIL_SEMAPHORE.get_or_init(|| Semaphore::new(4))
 }
 
-fn semaphore() -> &'static Semaphore {
-    static THUMBNAIL_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
-    THUMBNAIL_SEMAPHORE.get_or_init(|| {
-        let max_concurrent = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .max(1)
-            .min(4);
-        Semaphore::new(max_concurrent)
-    })
+fn preview_semaphore() -> &'static Semaphore {
+    static PREVIEW_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+    PREVIEW_SEMAPHORE.get_or_init(|| Semaphore::new(2))
 }
 
 fn check_ffmpeg() -> bool {
@@ -77,7 +70,7 @@ async fn get_video_hash(video_path: &str) -> Result<String, String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-async fn get_video_info(video_path: &str) -> Result<VideoInfo, String> {
+async fn get_video_info(video_path: &str) -> Result<(f64, Option<usize>), String> {
     let output = tokio::process::Command::new("ffprobe")
         .arg("-v")
         .arg("error")
@@ -120,10 +113,7 @@ async fn get_video_info(video_path: &str) -> Result<VideoInfo, String> {
         }
     }
 
-    Ok(VideoInfo {
-        duration,
-        cover_stream_index,
-    })
+    Ok((duration, cover_stream_index))
 }
 
 async fn extract_cover_art(video_path: &str, index: usize) -> Result<Vec<u8>, String> {
@@ -178,33 +168,70 @@ async fn extract_frame_at(video_path: &str, seek_time: f64) -> Result<Vec<u8>, S
     Ok(output.stdout)
 }
 
-async fn generate_thumbnail_data(video_path: &str) -> Result<Vec<u8>, String> {
-    let info = get_video_info(video_path).await?;
+async fn gen_thumb_data(video_path: &str) -> Result<Vec<u8>, String> {
+    let (duration, cover_index) = get_video_info(video_path).await?;
 
-    if let Some(index) = info.cover_stream_index {
+    if let Some(index) = cover_index {
         if let Ok(data) = extract_cover_art(video_path, index).await {
             return Ok(data);
         }
     }
 
-    let seek_time = if info.duration > 3.0 {
+    if duration <= 0.0 {
+        return Err("Video has no duration or no video stream".into());
+    }
+
+    let seek_time = if duration > 3.0 {
         3.0
-    } else if info.duration > 1.0 {
-        info.duration * 0.3
+    } else if duration > 1.0 {
+        duration * 0.3
     } else {
         0.0
     };
 
     match extract_frame_at(video_path, seek_time).await {
         Ok(data) => Ok(data),
-        Err(_) => {
-            if seek_time != 0.0 {
-                extract_frame_at(video_path, 0.0).await
-            } else {
-                Err("Failed to extract thumbnail even at position 0".into())
-            }
-        }
+        Err(_) if seek_time != 0.0 => extract_frame_at(video_path, 0.0).await,
+        Err(e) => Err(e),
     }
+}
+
+async fn gen_gif_data(video_path: &str) -> Result<Vec<u8>, String> {
+    let (duration, _) = get_video_info(video_path).await?;
+    if duration <= 0.0 {
+        return Err("Video has no duration".into());
+    }
+
+    let max_duration = 10.0;
+    let effective_duration = if duration < max_duration { duration } else { max_duration };
+    let fps = 30.0;
+
+    let output = tokio::process::Command::new("ffmpeg")
+        .arg("-ss")
+        .arg("0")
+        .arg("-i")
+        .arg(video_path)
+        .arg("-t")
+        .arg(effective_duration.to_string())
+        .arg("-vf")
+        .arg(format!(
+            "fps={},scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+            fps
+        ))
+        .arg("-an")
+        .arg("-f")
+        .arg("gif")
+        .arg("-")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to generate preview gif: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("Empty gif output".into());
+    }
+    Ok(output.stdout)
 }
 
 #[tauri::command]
@@ -286,7 +313,7 @@ async fn scan_videos(
 }
 
 #[tauri::command]
-async fn generate_thumbnail(
+async fn gen_thumb(
     app_handle: tauri::AppHandle,
     video_path: String,
 ) -> Result<String, String> {
@@ -299,12 +326,12 @@ async fn generate_thumbnail(
         return Ok(BASE64_STANDARD.encode(data));
     }
 
-    let _permit = semaphore()
+    let _permit = thumbnail_semaphore()
         .acquire()
         .await
         .map_err(|e| format!("Failed to acquire semaphore: {}", e))?;
 
-    let image_data = generate_thumbnail_data(&video_path).await?;
+    let image_data = gen_thumb_data(&video_path).await?;
 
     let cache_file_clone = cache_file.clone();
     let image_data_clone = image_data.clone();
@@ -314,6 +341,37 @@ async fn generate_thumbnail(
 
     use base64::prelude::*;
     Ok(BASE64_STANDARD.encode(image_data))
+}
+
+#[tauri::command]
+async fn gen_gif(
+    app_handle: tauri::AppHandle,
+    video_path: String,
+) -> Result<String, String> {
+    let cache_dir = get_cache_dir(&app_handle).await?;
+    let hash = get_video_hash(&video_path).await?;
+    let cache_file = cache_dir.join(format!("preview_{}.gif", hash));
+
+    if let Ok(data) = fs::read(&cache_file).await {
+        use base64::prelude::*;
+        return Ok(BASE64_STANDARD.encode(data));
+    }
+
+    let _permit = preview_semaphore()
+        .acquire()
+        .await
+        .map_err(|e| format!("Failed to acquire semaphore: {}", e))?;
+
+    let gif_data = gen_gif_data(&video_path).await?;
+
+    let cache_file_clone = cache_file.clone();
+    let gif_data_clone = gif_data.clone();
+    tokio::spawn(async move {
+        let _ = fs::write(cache_file_clone, gif_data_clone).await;
+    });
+
+    use base64::prelude::*;
+    Ok(BASE64_STANDARD.encode(gif_data))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -326,7 +384,8 @@ pub fn run() {
             get_startup_status,
             set_library_path,
             scan_videos,
-            generate_thumbnail,
+            gen_thumb,
+            gen_gif,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
