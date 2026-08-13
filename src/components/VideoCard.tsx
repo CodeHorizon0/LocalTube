@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import styles from "./VideoCard.module.css";
 import { VideoFile } from "../types";
 import {
@@ -14,6 +15,8 @@ interface VideoCardProps {
 }
 
 function VideoCard({ video, skeleton = false }: VideoCardProps) {
+  const navigate = useNavigate();
+
   if (skeleton) {
     return (
       <div className={styles.videoCard}>
@@ -144,6 +147,10 @@ function VideoCard({ video, skeleton = false }: VideoCardProps) {
     setGifLoading(false);
   }
 
+  function handleCardClick() {
+    navigate("/video/" + encodeURIComponent(video!.path));
+  }
+
   const cardStyle = shadowColor
     ? ({ "--shadow-color": shadowColor } as React.CSSProperties)
     : {};
@@ -175,6 +182,7 @@ function VideoCard({ video, skeleton = false }: VideoCardProps) {
       style={cardStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={handleCardClick}
     >
       <div className={styles.thumbnail}>{thumbnailContent}</div>
       <div className={styles.videoInfo}>

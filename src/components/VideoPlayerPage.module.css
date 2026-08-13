@@ -1,0 +1,73 @@
+.page {
+  display: flex;
+  height: 100vh;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.playerWrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #0f0f0f;
+  padding: 20px;
+  min-width: 0;
+}
+
+.sidebar {
+  width: 350px;
+  background-color: var(--bg-secondary);
+  border-left: 1px solid #2a2a2a;
+  overflow-y: auto;
+  padding: 16px 0;
+  flex-shrink: 0;
+}
+
+.loading,
+.notFound {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+  gap: 16px;
+}
+
+.notFound h2 {
+  font-size: 2rem;
+  color: var(--text-secondary);
+}
+
+.backButton {
+  background-color: var(--accent);
+  color: #000;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.backButton:hover {
+  background-color: #2799f0;
+}
+
+@media (max-width: 768px) {
+  .page {
+    flex-direction: column;
+    height: auto;
+  }
+  .playerWrapper {
+    height: 50vh;
+    padding: 10px;
+  }
+  .sidebar {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #2a2a2a;
+    height: 50vh;
+  }
+}

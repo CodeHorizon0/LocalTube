@@ -1,65 +1,12 @@
-// App.tsx
-import React, { Suspense, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import React, { Suspense } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AppProvider, useAppContext } from "./AppContext";
 import styles from "./App.module.css";
-import { VideoFile, StartupStatus, VIDEO_FORMATS } from "./types";
+import VideoCard from "./components/VideoCard";
+import VideoPlayerPage from "./components/VideoPlayerPage";
 
-const VideoCard = React.lazy(function () {
-  return import("./components/VideoCard");
-});
-
-function App() {
-  const [videos, setVideos] = useState<VideoFile[]>([]);
-  const [path, setPath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  async function scan(folder: string) {
-    setLoading(true);
-    try {
-      const result = await invoke<VideoFile[]>("scan_videos", {
-        basePath: folder,
-        extensions: VIDEO_FORMATS,
-      });
-      setVideos(result);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function chooseFolder() {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-    });
-    if (typeof selected !== "string") return;
-    await invoke("set_library_path", { path: selected });
-    setPath(selected);
-    await scan(selected);
-  }
-
-  useEffect(function () {
-    async function init() {
-      try {
-        const status = await invoke<StartupStatus>("get_startup_status");
-        if (!status.ffmpeg_available) {
-          setError(status.error);
-        }
-        if (status.library_path) {
-          setPath(status.library_path);
-          await scan(status.library_path);
-        }
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
-    }
-    init();
-  }, []);
+function HomePage() {
+  const { videos, path, loading, error, chooseFolder } = useAppContext();
 
   if (error) {
     return (
@@ -117,6 +64,19 @@ function App() {
         )}
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppProvider>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/video/:encodedPath" element={<VideoPlayerPage />} />
+        </Routes>
+      </AppProvider>
+    </BrowserRouter>
   );
 }
 
