@@ -1,9 +1,17 @@
-import React, { useEffect, useState } from "react";
+// VideoPlayerPage.tsx
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppContext } from "../AppContext";
 import VideoPlayer from "./VideoPlayer";
 import VideoList from "./VideoList";
 import styles from "./VideoPlayerPage.module.css";
+
+function cleanTitle(filename: string): string {
+  let name = filename.replace(/\.[^.]+$/, "");
+  name = name.replace(/[^a-zA-Z0-9]/g, " ");
+  name = name.replace(/\s+/g, " ").trim();
+  return name;
+}
 
 function VideoPlayerPage() {
   const { encodedPath } = useParams<{ encodedPath: string }>();
@@ -32,7 +40,7 @@ function VideoPlayerPage() {
     return (
       <div className={styles.notFound}>
         <h2>Video not found</h2>
-        <button className={styles.backButton} onClick={() => navigate("/")}>
+        <button className={styles.backButton} onClick={function () { navigate("/"); }}>
           Go back to library
         </button>
       </div>
@@ -43,6 +51,7 @@ function VideoPlayerPage() {
     <div className={styles.page}>
       <div className={styles.playerWrapper}>
         <VideoPlayer video={currentVideo} />
+        <div className={styles.videoTitle}>{cleanTitle(currentVideo.name)}</div>
       </div>
       <div className={styles.sidebar}>
         <VideoList

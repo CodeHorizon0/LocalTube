@@ -1,9 +1,92 @@
+// thumbnailHelpers.ts
 import { invoke } from "@tauri-apps/api/core";
 import { ColorGroup } from "../types";
 
 const thumbnailCache = new Map<string, string>();
 const previewGifCache = new Map<string, string>();
 export const shadowColorCache = new Map<string, string>();
+
+export function getDominantColorFromImageData(imageData: ImageData): string | null {
+  const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
+  const shift = 3;
+  const map = new Map<string, ColorGroup>();
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if ((x + y) % 2 !== 0) continue;
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const key = `${r >> shift},${g >> shift},${b >> shift}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count++;
+        existing.sumR += r;
+        existing.sumG += g;
+        existing.sumB += b;
+      } else {
+        map.set(key, {
+          count: 1,
+          sumR: r,
+          sumG: g,
+          sumB: b,
+        });
+      }
+    }
+  }
+
+  if (map.size === 0) {
+    return null;
+  }
+
+  const groups = Array.from(map.values());
+  groups.sort(function (a, b) {
+    return b.count - a.count;
+  });
+
+  const primary = groups[0];
+  let secondary: ColorGroup | null = null;
+  if (groups.length > 1) {
+    secondary = groups[1];
+  }
+
+  let shadowR: number, shadowG: number, shadowB: number;
+  if (secondary) {
+    const pR = Math.round(primary.sumR / primary.count);
+    const pG = Math.round(primary.sumG / primary.count);
+    const pB = Math.round(primary.sumB / primary.count);
+    const sR = Math.round(secondary.sumR / secondary.count);
+    const sG = Math.round(secondary.sumG / secondary.count);
+    const sB = Math.round(secondary.sumB / secondary.count);
+    shadowR = Math.round((pR + sR) / 2);
+    shadowG = Math.round((pG + sG) / 2);
+    shadowB = Math.round((pB + sB) / 2);
+  } else {
+    shadowR = Math.round(primary.sumR / primary.count);
+    shadowG = Math.round(primary.sumG / primary.count);
+    shadowB = Math.round(primary.sumB / primary.count);
+  }
+
+  let brightness = (shadowR + shadowG + shadowB) / 3;
+  const minBright = 50;
+  const maxBright = 200;
+  if (brightness < minBright) {
+    const factor = minBright / brightness;
+    shadowR = Math.min(255, Math.round(shadowR * factor));
+    shadowG = Math.min(255, Math.round(shadowG * factor));
+    shadowB = Math.min(255, Math.round(shadowB * factor));
+  } else if (brightness > maxBright) {
+    const factor = maxBright / brightness;
+    shadowR = Math.round(shadowR * factor);
+    shadowG = Math.round(shadowG * factor);
+    shadowB = Math.round(shadowB * factor);
+  }
+
+  return `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.5)`;
+}
 
 export function generateThumbnail(videoPath: string): Promise<string> {
   return new Promise(function (resolve, reject) {
@@ -74,90 +157,12 @@ export function computeShadowColor(img: HTMLImageElement): string | null {
     canvas.width = drawW;
     canvas.height = drawH;
     ctx.drawImage(img, 0, 0, drawW, drawH);
-
     const imageData = ctx.getImageData(0, 0, drawW, drawH);
-    const data = imageData.data;
-
-    const shift = 3;
-    const map = new Map<string, ColorGroup>();
-
-    for (let y = 0; y < drawH; y++) {
-      for (let x = 0; x < drawW; x++) {
-        if ((x + y) % 2 !== 0) continue;
-        const idx = (y * drawW + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const key = `${r >> shift},${g >> shift},${b >> shift}`;
-        const existing = map.get(key);
-        if (existing) {
-          existing.count++;
-          existing.sumR += r;
-          existing.sumG += g;
-          existing.sumB += b;
-        } else {
-          map.set(key, {
-            count: 1,
-            sumR: r,
-            sumG: g,
-            sumB: b,
-          });
-        }
-      }
+    const color = getDominantColorFromImageData(imageData);
+    if (src && color) {
+      shadowColorCache.set(src, color);
     }
-
-    if (map.size === 0) {
-      return null;
-    }
-
-    const groups = Array.from(map.values());
-    groups.sort(function (a, b) {
-      return b.count - a.count;
-    });
-
-    const primary = groups[0];
-    let secondary: ColorGroup | null = null;
-    if (groups.length > 1) {
-      secondary = groups[1];
-    }
-
-    let shadowR: number, shadowG: number, shadowB: number;
-    if (secondary) {
-      const pR = Math.round(primary.sumR / primary.count);
-      const pG = Math.round(primary.sumG / primary.count);
-      const pB = Math.round(primary.sumB / primary.count);
-      const sR = Math.round(secondary.sumR / secondary.count);
-      const sG = Math.round(secondary.sumG / secondary.count);
-      const sB = Math.round(secondary.sumB / secondary.count);
-      shadowR = Math.round((pR + sR) / 2);
-      shadowG = Math.round((pG + sG) / 2);
-      shadowB = Math.round((pB + sB) / 2);
-    } else {
-      shadowR = Math.round(primary.sumR / primary.count);
-      shadowG = Math.round(primary.sumG / primary.count);
-      shadowB = Math.round(primary.sumB / primary.count);
-    }
-
-    let brightness = (shadowR + shadowG + shadowB) / 3;
-    const minBright = 50;
-    const maxBright = 200;
-    if (brightness < minBright) {
-      const factor = minBright / brightness;
-      shadowR = Math.min(255, Math.round(shadowR * factor));
-      shadowG = Math.min(255, Math.round(shadowG * factor));
-      shadowB = Math.min(255, Math.round(shadowB * factor));
-    } else if (brightness > maxBright) {
-      const factor = maxBright / brightness;
-      shadowR = Math.round(shadowR * factor);
-      shadowG = Math.round(shadowG * factor);
-      shadowB = Math.round(shadowB * factor);
-    }
-
-    const result = `rgba(${shadowR}, ${shadowG}, ${shadowB}, 0.5)`;
-    if (src) {
-      shadowColorCache.set(src, result);
-    }
-    return result;
+    return color;
   } catch (_) {
     return null;
   }
